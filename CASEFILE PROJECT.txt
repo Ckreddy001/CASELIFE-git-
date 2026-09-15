@@ -1,0 +1,909 @@
+
+==========================================================================================
+FILE: README.md
+==========================================================================================
+# CASEFILE: An AI-Powered Missing Person Investigation and Probable Location Prediction System Using Advanced Machine Learning
+
+## Academic purpose
+This project is an academic simulation using synthetic fictional case information and synthetic movement data. It is designed to demonstrate advanced machine-learning, geospatial analysis, anomaly detection, route prediction, explainability, and dashboard development.
+
+**Important:** Model outputs are probabilistic and must not be treated as proof of a person's location, criminal behavior, or real-world investigative evidence.
+
+## Required techniques
+1. K-Means clustering
+2. Isolation Forest anomaly detection
+3. Random Forest location-area prediction
+4. Markov Chain route prediction
+5. Search-priority scoring
+6. Feature importance / optional SHAP explainability
+7. Folium interactive map
+8. Streamlit dashboard
+
+## Project structure
+```text
+CASEFILE_MISSING_PERSON/
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   └── synthetic/
+├── models/
+├── notebooks/
+├── src/
+├── app/
+├── reports/
+├── docs/
+├── requirements.txt
+├── run_pipeline.py
+└── README.md
+```
+
+## Mac setup
+```bash
+cd CASEFILE_MISSING_PERSON
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python run_pipeline.py
+streamlit run app/app.py
+```
+
+## Output
+The pipeline creates:
+- synthetic historical GPS data
+- fictional CASEFILE records
+- engineered movement features
+- K-Means location clusters
+- Isolation Forest anomaly results
+- Random Forest probable-area predictions
+- Markov Chain route probabilities
+- search-priority scores
+- feature-importance explanations
+- trained `.pkl` models
+- an interactive Streamlit dashboard
+
+## Optional public dataset
+The project guide recommends the Microsoft GeoLife GPS Trajectory Dataset as a public GPS source. If you use it, keep the original files in `data/raw/`, document the source/license/usage, and adapt the preprocessing notebook/script to its actual schema.
+
+## Ethics
+Use fictional identities and synthetic cases. Do not use private or personally identifying movement data. An anomaly is not automatically suspicious or criminal. Results should be described as model-generated probabilities.
+
+==========================================================================================
+FILE: app/app.py
+==========================================================================================
+from pathlib import Path
+import sys
+import joblib
+import pandas as pd
+import numpy as np
+import streamlit as st
+from streamlit_folium import st_folium
+
+BASE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE))
+
+from src.location_prediction import predict_case
+from src.mapping import make_map, AREA_COORDS
+from src.explainability import random_forest_feature_importance
+
+st.set_page_config(
+    page_title="CASEFILE AI Investigation Dashboard",
+    page_icon="🧭",
+    layout="wide"
+)
+
+st.title("CASEFILE — AI-Powered Missing Person Investigation Support")
+st.warning(
+    "Academic simulation only. All case/movement data are synthetic. "
+    "Model outputs are probabilistic and are not proof of a person's location "
+    "or evidence of criminal behavior."
+)
+
+required = [
+    BASE/"data/synthetic/case_records.csv",
+    BASE/"data/processed/final_movement_results.csv",
+    BASE/"models/location_model.pkl",
+    BASE/"models/markov_route_model.pkl"
+]
+if not all(p.exists() for p in required):
+    st.error("Run `python run_pipeline.py` first.")
+    st.stop()
+
+cases = pd.read_csv(BASE/"data/synthetic/case_records.csv")
+movement = pd.read_csv(BASE/"data/processed/final_movement_results.csv")
+loc_pack = joblib.load(BASE/"models/location_model.pkl")
+markov = joblib.load(BASE/"models/markov_route_model.pkl")
+
+case_id = st.sidebar.selectbox("Select fictional case", cases["Case_ID"])
+case = cases[cases["Case_ID"] == case_id].iloc[0].to_dict()
+
+st.sidebar.markdown("### Case information")
+st.sidebar.write(f"Age group: {case['Age_Group']}")
+st.sidebar.write(f"Last seen: {case['Last_Seen_Time']}")
+st.sidebar.write(f"Weather: {case['Weather']}")
+st.sidebar.write(f"Usual area: {case['Usual_Area']}")
+
+pred = predict_case(case, loc_pack["preprocessor"], loc_pack["model"])
+pred["Probability"] = pred["Probability"].astype(float)
+
+# Simple academic priority components.
+hist_counts = movement["Area"].value_counts()
+hist = hist_counts.reindex(pred["Area"]).fillna(0)
+hist_norm = (hist - hist.min()) / (hist.max() - hist.min() + 1e-9)
+pred_norm = (pred["Probability"] - pred["Probability"].min()) / (
+    pred["Probability"].max() - pred["Probability"].min() + 1e-9
+)
+pred["Search_Priority"] = (
+    0.30 * pred_norm +
+    0.20 * hist_norm +
+    0.15 * 0.5 +
+    0.15 * 0.5 +
+    0.10 * 0.5 +
+    0.10 * 0.0
+) * 100
+pred["Priority_Band"] = pd.cut(
+    pred["Search_Priority"],
+    [-1, 30, 60, 80, 101],
+    labels=["Low", "Medium", "High", "Very High"]
+)
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Case", case_id)
+col2.metric("Top predicted area", pred.iloc[0]["Area"])
+col3.metric("Top probability", f"{pred.iloc[0]['Probability']:.1%}")
+col4.metric("Top priority", f"{pred.iloc[0]['Search_Priority']:.1f}/100")
+
+st.subheader("1. Ranked probable locations")
+show = pred[["Area", "Probability", "Search_Priority", "Priority_Band"]].copy()
+show["Probability"] = show["Probability"].map(lambda x: f"{x:.1%}")
+show["Search_Priority"] = show["Search_Priority"].map(lambda x: f"{x:.1f}")
+st.dataframe(show, use_container_width=True, hide_index=True)
+
+st.subheader("2. Markov Chain route prediction")
+start = case["Previous_Area"]
+route, route_probs = markov.predict_route(start, steps=4)
+st.write(f"Simulated most-probable route starting from **{start}**:")
+st.write(" → ".join(route))
+if route_probs:
+    st.write("Transition probabilities:", [f"{p:.1%}" for p in route_probs])
+
+st.subheader("3. Historical movement analysis")
+a, b, c = st.columns(3)
+a.metric("Historical records", f"{len(movement):,}")
+b.metric("Unique areas", str(movement["Area"].nunique()))
+c.metric("Detected anomalies", str(int(movement.get("Anomaly", pd.Series(dtype=int)).sum())))
+
+freq = movement["Area"].value_counts().head(8)
+st.bar_chart(freq)
+
+st.subheader("4. Explainability")
+try:
+    imp = random_forest_feature_importance(
+        loc_pack["model"], loc_pack["preprocessor"]
+    )
+    st.dataframe(imp.head(10), use_container_width=True, hide_index=True)
+    st.info(
+        "Feature importance shows which input features were influential to the "
+        "Random Forest model overall. It does not establish causation."
+    )
+except Exception as e:
+    st.info(f"Feature-importance display unavailable: {e}")
+
+st.subheader("5. Interactive map")
+frequent = list(movement["Area"].value_counts().head(3).index)
+map_obj = make_map(
+    case["Last_Latitude"],
+    case["Last_Longitude"],
+    frequent,
+    pred.rename(columns={"Probability": "Probability"})[["Area", "Probability"]],
+    route=route
+)
+st_folium(map_obj, width=None, height=600)
+
+st.subheader("6. Ethical limitations")
+st.markdown("""
+- This is a fictional academic simulation.
+- A model probability is not proof of a person's location.
+- An anomaly is not automatically suspicious or criminal.
+- False positives and false negatives are possible.
+- Data bias, synthetic-label limitations and model uncertainty must be reported.
+""")
+
+==========================================================================================
+FILE: docs/dataset_documentation.md
+==========================================================================================
+# Dataset Documentation
+
+## 1. Synthetic movement dataset
+**Name:** CASEFILE Synthetic Historical GPS Movement Dataset  
+**Source:** Generated locally by `src/generate_data.py`  
+**Purpose:** Academic demonstration of movement-pattern analysis.  
+**Privacy:** No real person or real missing-person case is represented.
+
+Main fields:
+- User_ID
+- Timestamp
+- Latitude
+- Longitude
+- Speed_kmh
+- Distance_km
+- Day
+- Weather
+- Area
+
+## 2. Synthetic case dataset
+Fields follow the project guideline:
+- Case_ID
+- Person_ID
+- Age_Group
+- Gender
+- Last_Latitude
+- Last_Longitude
+- Last_Seen_Time
+- Day
+- Weather
+- Usual_Area
+- Average_Distance
+- Average_Speed
+- Previous_Area
+- Time_Since_Last_Seen
+- Target_Area
+
+## 3. Optional public GPS source
+The project guideline recommends:
+**Microsoft GeoLife GPS Trajectory Dataset**
+Source: Microsoft Research GeoLife GPS Trajectories
+Use only according to the dataset's published terms and document the exact source URL, record count, features, and usage conditions in your final report.
+
+## Data-processing notes
+Invalid coordinates, duplicate records, missing values and malformed timestamps should be handled before model training. Time features include hour, weekday, month and weekend indicators.
+
+==========================================================================================
+FILE: reports/FINAL_REPORT_STRUCTURE.md
+==========================================================================================
+# Final Report Structure
+
+1. Abstract
+2. Introduction
+3. Problem Statement
+4. Objectives
+5. Literature Review
+6. Dataset Description
+7. Data Preprocessing
+8. Feature Engineering
+9. Exploratory Data Analysis
+10. Movement Clustering
+11. Anomaly Detection
+12. Location Prediction
+13. Markov Chain Route Prediction
+14. Search-Priority Score
+15. Explainable AI
+16. Interactive Map and Streamlit Dashboard
+17. Model Training and Evaluation
+18. Results
+19. Limitations
+20. Ethics and Privacy
+21. Future Scope
+22. Conclusion
+23. References
+
+Use the actual experiment results produced by the project; do not invent performance values.
+
+==========================================================================================
+FILE: requirements.txt
+==========================================================================================
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+plotly
+folium
+streamlit
+streamlit-folium
+joblib
+shap
+xgboost
+geopandas
+openpyxl
+jupyter
+
+==========================================================================================
+FILE: run_pipeline.py
+==========================================================================================
+from pathlib import Path
+import sys
+import joblib
+import pandas as pd
+import numpy as np
+
+BASE = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE))
+
+from src.generate_data import generate_movement, generate_cases
+from src.preprocessing import clean_movement, add_movement_features
+from src.clustering import train_kmeans
+from src.anomaly_detection import train_isolation_forest
+from src.location_prediction import train_location_model
+from src.route_prediction import MarkovRouteModel
+from src.priority_scoring import minmax
+
+def main():
+    (BASE/"data/processed").mkdir(parents=True, exist_ok=True)
+    (BASE/"models").mkdir(parents=True, exist_ok=True)
+
+    print("1/7 Generating synthetic historical movement...")
+    movement = generate_movement()
+    cases = generate_cases(movement)
+    movement.to_csv(BASE/"data/synthetic/historical_movement.csv", index=False)
+    cases.to_csv(BASE/"data/synthetic/case_records.csv", index=False)
+
+    print("2/7 Cleaning and feature engineering...")
+    movement = clean_movement(movement)
+    movement = add_movement_features(movement)
+    movement.to_csv(BASE/"data/processed/feature_data.csv", index=False)
+
+    print("3/7 K-Means clustering...")
+    clustered, km, km_scaler = train_kmeans(movement)
+    joblib.dump(
+        {"model": km, "scaler": km_scaler},
+        BASE/"models/clustering_model.pkl"
+    )
+    clustered.to_csv(BASE/"data/processed/clustering_results.csv", index=False)
+
+    print("4/7 Isolation Forest anomaly detection...")
+    anomalous, anomaly_model = train_isolation_forest(clustered)
+    joblib.dump(
+        {"model": anomaly_model},
+        BASE/"models/anomaly_model.pkl"
+    )
+    anomalous.to_csv(BASE/"data/processed/anomaly_results.csv", index=False)
+
+    print("5/7 Random Forest probable-area model...")
+    _, pre, rf, metrics = train_location_model(cases)
+    joblib.dump(
+        {"preprocessor": pre, "model": rf},
+        BASE/"models/location_model.pkl"
+    )
+    pd.DataFrame([{
+        "Accuracy": metrics["accuracy"],
+        "Precision": metrics["precision_weighted"],
+        "Recall": metrics["recall_weighted"],
+        "F1": metrics["f1_weighted"]
+    }]).to_csv(BASE/"data/processed/model_metrics.csv", index=False)
+
+    print("6/7 Markov Chain route prediction...")
+    markov = MarkovRouteModel().fit(movement)
+    joblib.dump(markov, BASE/"models/markov_route_model.pkl")
+
+    print("7/7 Saving final datasets...")
+    clustered.to_csv(BASE/"data/processed/final_movement_results.csv", index=False)
+
+    print("\nPIPELINE COMPLETE")
+    print(f"Movement records: {len(movement):,}")
+    print(f"Cases: {len(cases):,}")
+    print(f"Location model metrics: {metrics}")
+    print("\nRun dashboard:")
+    print("streamlit run app/app.py")
+
+if __name__ == "__main__":
+    main()
+
+==========================================================================================
+FILE: src/__init__.py
+==========================================================================================
+
+==========================================================================================
+FILE: src/anomaly_detection.py
+==========================================================================================
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+import joblib
+
+FEATURES = [
+    "Speed_kmh", "Distance_km", "Hour",
+    "Consecutive_Distance_km", "Area_Visit_Frequency"
+]
+
+def train_isolation_forest(df):
+    X = df[FEATURES].fillna(0)
+    model = IsolationForest(
+        n_estimators=250,
+        contamination=0.03,
+        random_state=42
+    )
+    out = df.copy()
+    out["Anomaly_Prediction"] = model.fit_predict(X)
+    out["Anomaly_Score"] = -model.score_samples(X)
+    out["Anomaly"] = (out["Anomaly_Prediction"] == -1).astype(int)
+    return out, model
+
+def run_lof(df):
+    X = df[FEATURES].fillna(0)
+    lof = LocalOutlierFactor(n_neighbors=25, contamination=0.03)
+    out = df.copy()
+    out["LOF_Anomaly"] = (lof.fit_predict(X) == -1).astype(int)
+    return out
+
+if __name__ == "__main__":
+    import pandas as pd
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]
+    df = pd.read_csv(base/"data/processed/feature_data.csv")
+    out, model = train_isolation_forest(df)
+    joblib.dump({"model": model, "features": FEATURES},
+                base/"models/anomaly_model.pkl")
+    out.to_csv(base/"data/processed/anomaly_results.csv", index=False)
+
+==========================================================================================
+FILE: src/clustering.py
+==========================================================================================
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.preprocessing import StandardScaler
+import joblib
+
+FEATURES = ["Latitude", "Longitude", "Hour", "Speed_kmh", "Distance_km"]
+
+def train_kmeans(df, n_clusters=8):
+    X = df[FEATURES].fillna(0)
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+
+    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    df = df.copy()
+    df["Cluster"] = model.fit_predict(Xs)
+
+    return df, model, scaler
+
+def train_dbscan(df):
+    X = df[["Latitude", "Longitude"]].fillna(0)
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+    model = DBSCAN(eps=0.35, min_samples=8)
+    labels = model.fit_predict(Xs)
+    out = df.copy()
+    out["DBSCAN_Cluster"] = labels
+    return out, model, scaler
+
+if __name__ == "__main__":
+    import pandas as pd
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]
+    df = pd.read_csv(base/"data/synthetic/historical_movement.csv")
+    out, model, scaler = train_kmeans(df)
+    joblib.dump({"model": model, "scaler": scaler, "features": FEATURES},
+                base/"models/clustering_model.pkl")
+    out.to_csv(base/"data/processed/clustering_results.csv", index=False)
+
+==========================================================================================
+FILE: src/explainability.py
+==========================================================================================
+import pandas as pd
+
+def random_forest_feature_importance(model, preprocessor):
+    names = preprocessor.get_feature_names_out()
+    importance = model.feature_importances_
+    return pd.DataFrame({
+        "Feature": names,
+        "Importance": importance
+    }).sort_values("Importance", ascending=False)
+
+def explanation_text(top_features, area, probability):
+    parts = []
+    for _, row in top_features.head(5).iterrows():
+        parts.append(f"{row['Feature']} contributed to the model's decision")
+    return (
+        f"{area} received a model probability of {probability:.1%}. "
+        + "; ".join(parts) + ". "
+        "This is a probabilistic model explanation, not proof of location."
+    )
+
+==========================================================================================
+FILE: src/generate_data.py
+==========================================================================================
+import numpy as np
+import pandas as pd
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[1]
+SYN = BASE / "data" / "synthetic"
+SYN.mkdir(parents=True, exist_ok=True)
+
+rng = np.random.default_rng(42)
+
+# Fictional study region: Bhopal-like coordinate range.
+AREAS = {
+    "Area_A": (23.2599, 77.4126),
+    "Area_B": (23.2350, 77.4340),
+    "Area_C": (23.2850, 77.3500),
+    "Area_D": (23.2150, 77.3900),
+    "Area_E": (23.3000, 77.4550),
+    "Area_F": (23.2450, 77.4700),
+    "Area_G": (23.2750, 77.4200),
+    "Area_H": (23.2250, 77.4500),
+}
+
+def generate_movement(n_users=35, days=35):
+    rows = []
+    area_names = list(AREAS)
+
+    for uid in range(1, n_users + 1):
+        preferred = rng.choice(area_names)
+        for day in range(days):
+            n_points = int(rng.integers(18, 34))
+            start = pd.Timestamp("2026-07-01") + pd.Timedelta(days=day)
+            times = [start + pd.Timedelta(minutes=int(x)) for x in sorted(
+                rng.choice(np.arange(0, 24 * 60), size=n_points, replace=False)
+            )]
+
+            current_area = preferred
+            for ts in times:
+                if rng.random() < 0.18:
+                    current_area = rng.choice(area_names)
+
+                lat0, lon0 = AREAS[current_area]
+                lat = lat0 + rng.normal(0, 0.0045)
+                lon = lon0 + rng.normal(0, 0.0045)
+
+                speed = max(0.5, rng.normal(22 if 7 <= ts.hour <= 20 else 12, 5))
+                rows.append([
+                    f"U{uid:03d}", ts, lat, lon, speed,
+                    "Friday" if ts.dayofweek == 4 else ts.day_name(),
+                    "Rain" if rng.random() < 0.18 else "Clear",
+                    current_area
+                ])
+
+    df = pd.DataFrame(rows, columns=[
+        "User_ID", "Timestamp", "Latitude", "Longitude",
+        "Speed_kmh", "Day", "Weather", "Area"
+    ])
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+    df = df.sort_values(["User_ID", "Timestamp"]).reset_index(drop=True)
+
+    # Consecutive distance using a small-region approximation.
+    dlat = df.groupby("User_ID")["Latitude"].diff()
+    dlon = df.groupby("User_ID")["Longitude"].diff()
+    df["Distance_km"] = np.sqrt((dlat * 111)**2 + (dlon * 102)**2).fillna(0)
+    df["Hour"] = df["Timestamp"].dt.hour
+    df["Weekday"] = df["Timestamp"].dt.dayofweek
+    df["Weekend"] = (df["Weekday"] >= 5).astype(int)
+
+    # Add a small number of naturally unusual points for anomaly-model demonstration.
+    idx = rng.choice(df.index, size=max(10, len(df)//250), replace=False)
+    df.loc[idx, "Speed_kmh"] *= rng.uniform(2.5, 4.0, size=len(idx))
+    df.loc[idx, "Distance_km"] *= rng.uniform(2.0, 5.0, size=len(idx))
+
+    return df
+
+def generate_cases(movement):
+    stats = movement.groupby("User_ID").agg(
+        Average_Distance=("Distance_km", "mean"),
+        Average_Speed=("Speed_kmh", "mean"),
+        Last_Latitude=("Latitude", "last"),
+        Last_Longitude=("Longitude", "last"),
+        Usual_Area=("Area", lambda s: s.mode().iloc[0]),
+        Previous_Area=("Area", lambda s: s.iloc[-2] if len(s) > 1 else s.iloc[-1]),
+        Last_Seen_Time=("Timestamp", "last")
+    ).reset_index()
+
+    cases = []
+    for i, row in stats.iterrows():
+        cases.append({
+            "Case_ID": f"MP-2026-{17+i:03d}",
+            "Person_ID": f"P-{1001+i}",
+            "Age_Group": rng.choice(["18-25", "26-35", "36-45"]),
+            "Gender": rng.choice(["Female", "Male"]),
+            "Last_Latitude": row.Last_Latitude,
+            "Last_Longitude": row.Last_Longitude,
+            "Last_Seen_Time": row.Last_Seen_Time,
+            "Day": row.Last_Seen_Time.day_name(),
+            "Weather": "Rain" if row.Last_Seen_Time.dayofweek % 3 == 0 else "Clear",
+            "Usual_Area": row.Usual_Area,
+            "Average_Distance": round(row.Average_Distance, 3),
+            "Average_Speed": round(row.Average_Speed, 3),
+            "Previous_Area": row.Previous_Area,
+            "Time_Since_Last_Seen": int(rng.integers(1, 9)),
+            "Target_Area": rng.choice(list(AREAS.keys()))
+        })
+    return pd.DataFrame(cases)
+
+if __name__ == "__main__":
+    movement = generate_movement()
+    cases = generate_cases(movement)
+    movement.to_csv(SYN / "historical_movement.csv", index=False)
+    cases.to_csv(SYN / "case_records.csv", index=False)
+    print(f"Movement records: {len(movement):,}")
+    print(f"Case records: {len(cases):,}")
+
+==========================================================================================
+FILE: src/location_prediction.py
+==========================================================================================
+import pandas as pd
+import numpy as np
+import joblib
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+
+FEATURES = [
+    "Age_Group", "Day", "Hour", "Weather", "Usual_Area",
+    "Previous_Area", "Last_Latitude", "Last_Longitude",
+    "Average_Distance", "Average_Speed", "Time_Since_Last_Seen"
+]
+TARGET = "Target_Area"
+
+def train_location_model(cases):
+    data = cases.copy()
+    data["Hour"] = pd.to_datetime(data["Last_Seen_Time"]).dt.hour
+
+    # Synthetic labels are deliberately generated for academic demonstration.
+    # In a real study, target labels would require a properly documented dataset.
+    X = data[FEATURES]
+    y = data[TARGET]
+
+    categorical = ["Age_Group", "Day", "Weather", "Usual_Area", "Previous_Area"]
+    numeric = [c for c in FEATURES if c not in categorical]
+
+    pre = ColumnTransformer([
+        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical),
+        ("num", StandardScaler(), numeric)
+    ])
+
+    model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=12,
+        min_samples_leaf=2,
+        class_weight="balanced",
+        random_state=42
+    )
+
+    Xtr, Xte, ytr, yte = train_test_split(
+        X, y, test_size=0.25, random_state=42, stratify=y
+    )
+
+    Xtr2 = pre.fit_transform(Xtr)
+    Xte2 = pre.transform(Xte)
+    model.fit(Xtr2, ytr)
+
+    pred = model.predict(Xte2)
+    metrics = {
+        "accuracy": float(accuracy_score(yte, pred)),
+        "precision_weighted": float(precision_score(yte, pred, average="weighted", zero_division=0)),
+        "recall_weighted": float(recall_score(yte, pred, average="weighted", zero_division=0)),
+        "f1_weighted": float(f1_score(yte, pred, average="weighted", zero_division=0)),
+        "confusion_matrix": confusion_matrix(yte, pred).tolist()
+    }
+
+    return data, pre, model, metrics
+
+def predict_case(case_row, pre, model):
+    row = pd.DataFrame([case_row]).copy()
+    row["Hour"] = pd.to_datetime(row["Last_Seen_Time"]).dt.hour
+    X = pre.transform(row[FEATURES])
+    probs = model.predict_proba(X)[0]
+    classes = model.classes_
+    result = pd.DataFrame({"Area": classes, "Probability": probs})
+    return result.sort_values("Probability", ascending=False).reset_index(drop=True)
+
+if __name__ == "__main__":
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]
+    cases = pd.read_csv(base/"data/synthetic/case_records.csv")
+    _, pre, model, metrics = train_location_model(cases)
+    joblib.dump({"preprocessor": pre, "model": model, "features": FEATURES},
+                base/"models/location_model.pkl")
+    print(metrics)
+
+==========================================================================================
+FILE: src/mapping.py
+==========================================================================================
+import folium
+import pandas as pd
+
+AREA_COORDS = {
+    "Area_A": (23.2599, 77.4126),
+    "Area_B": (23.2350, 77.4340),
+    "Area_C": (23.2850, 77.3500),
+    "Area_D": (23.2150, 77.3900),
+    "Area_E": (23.3000, 77.4550),
+    "Area_F": (23.2450, 77.4700),
+    "Area_G": (23.2750, 77.4200),
+    "Area_H": (23.2250, 77.4500),
+}
+
+def make_map(last_lat, last_lon, frequent_areas, predicted_df, route=None):
+    m = folium.Map(location=[last_lat, last_lon], zoom_start=12)
+
+    folium.Marker(
+        [last_lat, last_lon],
+        tooltip="Last known simulated location",
+        icon=folium.Icon(icon="info-sign")
+    ).add_to(m)
+
+    for area in frequent_areas:
+        if area in AREA_COORDS:
+            lat, lon = AREA_COORDS[area]
+            folium.CircleMarker(
+                [lat, lon], radius=7,
+                tooltip=f"Frequent area: {area}"
+            ).add_to(m)
+
+    for _, row in predicted_df.iterrows():
+        area = row["Area"]
+        if area in AREA_COORDS:
+            lat, lon = AREA_COORDS[area]
+            folium.Marker(
+                [lat, lon],
+                tooltip=f"{area} | Probability {row['Probability']:.1%}"
+            ).add_to(m)
+
+    if route:
+        coords = [AREA_COORDS[a] for a in route if a in AREA_COORDS]
+        if len(coords) >= 2:
+            folium.PolyLine(coords, tooltip="Simulated Markov Chain route").add_to(m)
+
+    return m
+
+==========================================================================================
+FILE: src/preprocessing.py
+==========================================================================================
+import pandas as pd
+import numpy as np
+
+def clean_movement(df):
+    df = df.copy()
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+    df = df.dropna(subset=["Timestamp", "Latitude", "Longitude"])
+    df = df.drop_duplicates()
+
+    df = df[
+        df["Latitude"].between(-90, 90) &
+        df["Longitude"].between(-180, 180)
+    ].copy()
+
+    for col in ["Speed_kmh", "Distance_km"]:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(df[col].median())
+
+    df["Hour"] = df["Timestamp"].dt.hour
+    df["Weekday"] = df["Timestamp"].dt.dayofweek
+    df["Month"] = df["Timestamp"].dt.month
+    df["Weekend"] = (df["Weekday"] >= 5).astype(int)
+    df["Day_Name"] = df["Timestamp"].dt.day_name()
+
+    return df.sort_values(["User_ID", "Timestamp"]).reset_index(drop=True)
+
+def add_movement_features(df):
+    df = df.copy()
+    g = df.groupby("User_ID", group_keys=False)
+
+    df["Prev_Latitude"] = g["Latitude"].shift(1)
+    df["Prev_Longitude"] = g["Longitude"].shift(1)
+
+    dlat = df["Latitude"] - df["Prev_Latitude"]
+    dlon = df["Longitude"] - df["Prev_Longitude"]
+    df["Consecutive_Distance_km"] = np.sqrt((dlat * 111)**2 + (dlon * 102)**2).fillna(0)
+
+    df["Movement_Frequency"] = g["Area"].transform("count")
+    df["Area_Visit_Frequency"] = df.groupby(["User_ID", "Area"])["Area"].transform("count")
+    df["Total_User_Distance"] = g["Distance_km"].transform("sum")
+    df["Avg_User_Speed"] = g["Speed_kmh"].transform("mean")
+    df["Max_User_Speed"] = g["Speed_kmh"].transform("max")
+
+    return df
+
+==========================================================================================
+FILE: src/priority_scoring.py
+==========================================================================================
+import pandas as pd
+import numpy as np
+
+def minmax(series):
+    s = pd.Series(series, dtype=float)
+    if s.max() == s.min():
+        return pd.Series(np.ones(len(s)), index=s.index)
+    return (s - s.min()) / (s.max() - s.min())
+
+def calculate_priority(prediction, history_frequency, route_similarity,
+                       distance_relevance, time_relevance, anomaly_evidence):
+    # Guideline weights:
+    # prediction 30%, history 20%, route 15%, distance 15%, time 10%, anomaly 10%.
+    score = (
+        0.30 * prediction +
+        0.20 * history_frequency +
+        0.15 * route_similarity +
+        0.15 * distance_relevance +
+        0.10 * time_relevance +
+        0.10 * anomaly_evidence
+    ) * 100
+
+    band = np.select(
+        [score <= 30, score <= 60, score <= 80],
+        ["Low", "Medium", "High"],
+        default="Very High"
+    )
+    return score, band
+
+def rank_locations(probabilities, historical_counts, route_scores=None,
+                    distance_scores=None, time_scores=None, anomaly_scores=None):
+    areas = probabilities.index.astype(str)
+    n = len(areas)
+    route_scores = route_scores if route_scores is not None else np.zeros(n)
+    distance_scores = distance_scores if distance_scores is not None else np.zeros(n)
+    time_scores = time_scores if time_scores is not None else np.zeros(n)
+    anomaly_scores = anomaly_scores if anomaly_scores is not None else np.zeros(n)
+
+    hist = minmax(historical_counts.values)
+    pred = minmax(probabilities.values)
+
+    score, band = calculate_priority(
+        pred, hist, route_scores, distance_scores, time_scores, anomaly_scores
+    )
+    out = pd.DataFrame({
+        "Area": areas,
+        "Prediction_Probability": probabilities.values,
+        "Historical_Frequency": historical_counts.values,
+        "Search_Priority": score,
+        "Priority_Band": band
+    })
+    return out.sort_values("Search_Priority", ascending=False).reset_index(drop=True)
+
+==========================================================================================
+FILE: src/route_prediction.py
+==========================================================================================
+import pandas as pd
+import numpy as np
+import joblib
+from collections import defaultdict
+
+class MarkovRouteModel:
+    """First-order Markov Chain: P(next_area | current_area)."""
+
+    def __init__(self):
+        self.transition_counts = {}
+        self.probabilities = {}
+
+    def fit(self, df):
+        ordered = df.sort_values(["User_ID", "Timestamp"])
+        for _, user_df in ordered.groupby("User_ID"):
+            areas = user_df["Area"].dropna().tolist()
+            for a, b in zip(areas[:-1], areas[1:]):
+                if a != b:
+                    self.transition_counts.setdefault(a, {})
+                    self.transition_counts[a][b] = self.transition_counts[a].get(b, 0) + 1
+
+        for a, counts in self.transition_counts.items():
+            total = sum(counts.values())
+            self.probabilities[a] = {
+                b: n / total for b, n in counts.items()
+            }
+        return self
+
+    def next_locations(self, current_area, top_n=5):
+        vals = self.probabilities.get(current_area, {})
+        return sorted(vals.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    def predict_route(self, start_area, steps=4):
+        route = [start_area]
+        probs = []
+        current = start_area
+        for _ in range(steps):
+            candidates = self.next_locations(current, 1)
+            if not candidates:
+                break
+            nxt, p = candidates[0]
+            route.append(nxt)
+            probs.append(p)
+            current = nxt
+        return route, probs
+
+def save_model(model, path):
+    joblib.dump(model, path)
+
+if __name__ == "__main__":
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]
+    df = pd.read_csv(base/"data/synthetic/historical_movement.csv")
+    model = MarkovRouteModel().fit(df)
+    save_model(model, base/"models/markov_route_model.pkl")
