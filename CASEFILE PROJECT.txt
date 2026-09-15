@@ -1,75 +1,4 @@
 
-==========================================================================================
-FILE: README.md
-==========================================================================================
-# CASEFILE: An AI-Powered Missing Person Investigation and Probable Location Prediction System Using Advanced Machine Learning
-
-## Academic purpose
-This project is an academic simulation using synthetic fictional case information and synthetic movement data. It is designed to demonstrate advanced machine-learning, geospatial analysis, anomaly detection, route prediction, explainability, and dashboard development.
-
-**Important:** Model outputs are probabilistic and must not be treated as proof of a person's location, criminal behavior, or real-world investigative evidence.
-
-## Required techniques
-1. K-Means clustering
-2. Isolation Forest anomaly detection
-3. Random Forest location-area prediction
-4. Markov Chain route prediction
-5. Search-priority scoring
-6. Feature importance / optional SHAP explainability
-7. Folium interactive map
-8. Streamlit dashboard
-
-## Project structure
-```text
-CASEFILE_MISSING_PERSON/
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── synthetic/
-├── models/
-├── notebooks/
-├── src/
-├── app/
-├── reports/
-├── docs/
-├── requirements.txt
-├── run_pipeline.py
-└── README.md
-```
-
-## Mac setup
-```bash
-cd CASEFILE_MISSING_PERSON
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python run_pipeline.py
-streamlit run app/app.py
-```
-
-## Output
-The pipeline creates:
-- synthetic historical GPS data
-- fictional CASEFILE records
-- engineered movement features
-- K-Means location clusters
-- Isolation Forest anomaly results
-- Random Forest probable-area predictions
-- Markov Chain route probabilities
-- search-priority scores
-- feature-importance explanations
-- trained `.pkl` models
-- an interactive Streamlit dashboard
-
-## Optional public dataset
-The project guide recommends the Microsoft GeoLife GPS Trajectory Dataset as a public GPS source. If you use it, keep the original files in `data/raw/`, document the source/license/usage, and adapt the preprocessing notebook/script to its actual schema.
-
-## Ethics
-Use fictional identities and synthetic cases. Do not use private or personally identifying movement data. An anomaly is not automatically suspicious or criminal. Results should be described as model-generated probabilities.
-
-==========================================================================================
-FILE: app/app.py
-==========================================================================================
 from pathlib import Path
 import sys
 import joblib
@@ -208,108 +137,8 @@ st.markdown("""
 - Data bias, synthetic-label limitations and model uncertainty must be reported.
 """)
 
-==========================================================================================
-FILE: docs/dataset_documentation.md
-==========================================================================================
-# Dataset Documentation
 
-## 1. Synthetic movement dataset
-**Name:** CASEFILE Synthetic Historical GPS Movement Dataset  
-**Source:** Generated locally by `src/generate_data.py`  
-**Purpose:** Academic demonstration of movement-pattern analysis.  
-**Privacy:** No real person or real missing-person case is represented.
-
-Main fields:
-- User_ID
-- Timestamp
-- Latitude
-- Longitude
-- Speed_kmh
-- Distance_km
-- Day
-- Weather
-- Area
-
-## 2. Synthetic case dataset
-Fields follow the project guideline:
-- Case_ID
-- Person_ID
-- Age_Group
-- Gender
-- Last_Latitude
-- Last_Longitude
-- Last_Seen_Time
-- Day
-- Weather
-- Usual_Area
-- Average_Distance
-- Average_Speed
-- Previous_Area
-- Time_Since_Last_Seen
-- Target_Area
-
-## 3. Optional public GPS source
-The project guideline recommends:
-**Microsoft GeoLife GPS Trajectory Dataset**
-Source: Microsoft Research GeoLife GPS Trajectories
-Use only according to the dataset's published terms and document the exact source URL, record count, features, and usage conditions in your final report.
-
-## Data-processing notes
-Invalid coordinates, duplicate records, missing values and malformed timestamps should be handled before model training. Time features include hour, weekday, month and weekend indicators.
-
-==========================================================================================
-FILE: reports/FINAL_REPORT_STRUCTURE.md
-==========================================================================================
-# Final Report Structure
-
-1. Abstract
-2. Introduction
-3. Problem Statement
-4. Objectives
-5. Literature Review
-6. Dataset Description
-7. Data Preprocessing
-8. Feature Engineering
-9. Exploratory Data Analysis
-10. Movement Clustering
-11. Anomaly Detection
-12. Location Prediction
-13. Markov Chain Route Prediction
-14. Search-Priority Score
-15. Explainable AI
-16. Interactive Map and Streamlit Dashboard
-17. Model Training and Evaluation
-18. Results
-19. Limitations
-20. Ethics and Privacy
-21. Future Scope
-22. Conclusion
-23. References
-
-Use the actual experiment results produced by the project; do not invent performance values.
-
-==========================================================================================
-FILE: requirements.txt
-==========================================================================================
-pandas
-numpy
-scikit-learn
-matplotlib
-seaborn
-plotly
-folium
-streamlit
-streamlit-folium
-joblib
-shap
-xgboost
-geopandas
-openpyxl
-jupyter
-
-==========================================================================================
-FILE: run_pipeline.py
-==========================================================================================
+]
 from pathlib import Path
 import sys
 import joblib
@@ -388,13 +217,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-==========================================================================================
-FILE: src/__init__.py
-==========================================================================================
 
-==========================================================================================
-FILE: src/anomaly_detection.py
-==========================================================================================
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 import joblib
@@ -434,9 +257,7 @@ if __name__ == "__main__":
                 base/"models/anomaly_model.pkl")
     out.to_csv(base/"data/processed/anomaly_results.csv", index=False)
 
-==========================================================================================
-FILE: src/clustering.py
-==========================================================================================
+
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -474,9 +295,7 @@ if __name__ == "__main__":
                 base/"models/clustering_model.pkl")
     out.to_csv(base/"data/processed/clustering_results.csv", index=False)
 
-==========================================================================================
-FILE: src/explainability.py
-==========================================================================================
+
 import pandas as pd
 
 def random_forest_feature_importance(model, preprocessor):
@@ -497,9 +316,6 @@ def explanation_text(top_features, area, probability):
         "This is a probabilistic model explanation, not proof of location."
     )
 
-==========================================================================================
-FILE: src/generate_data.py
-==========================================================================================
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -614,9 +430,7 @@ if __name__ == "__main__":
     print(f"Movement records: {len(movement):,}")
     print(f"Case records: {len(cases):,}")
 
-==========================================================================================
-FILE: src/location_prediction.py
-==========================================================================================
+
 import pandas as pd
 import numpy as np
 import joblib
@@ -695,9 +509,7 @@ if __name__ == "__main__":
                 base/"models/location_model.pkl")
     print(metrics)
 
-==========================================================================================
-FILE: src/mapping.py
-==========================================================================================
+
 import folium
 import pandas as pd
 
@@ -745,9 +557,7 @@ def make_map(last_lat, last_lon, frequent_areas, predicted_df, route=None):
 
     return m
 
-==========================================================================================
-FILE: src/preprocessing.py
-==========================================================================================
+
 import pandas as pd
 import numpy as np
 
@@ -793,9 +603,7 @@ def add_movement_features(df):
 
     return df
 
-==========================================================================================
-FILE: src/priority_scoring.py
-==========================================================================================
+
 import pandas as pd
 import numpy as np
 
@@ -849,9 +657,6 @@ def rank_locations(probabilities, historical_counts, route_scores=None,
     })
     return out.sort_values("Search_Priority", ascending=False).reset_index(drop=True)
 
-==========================================================================================
-FILE: src/route_prediction.py
-==========================================================================================
 import pandas as pd
 import numpy as np
 import joblib
